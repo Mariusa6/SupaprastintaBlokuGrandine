@@ -6,7 +6,6 @@
 
 **Versija:** v0.2  
 **Data:** 2025-01-05  
-**Autorius:** [Jūsų vardas]
 
 ---
 
@@ -158,53 +157,6 @@ Valdžia visą blokų grandinę.
 - `is_chain_valid()`: Validuoja visą grandinę
 - `print_chain()`: Gražiai išveda grandinę
 - `get_statistics()`: Grąžina statistiką
-
----
-
-## Naudojimas
-
-### Reikalavimai
-
-- Python 3
-- Įmontuotos bibliotekos: hashlib, time, random, datetime, typing, json
-
-### Paleidimas
-
-```bash
-# Tiesiog paleiskite main.py
-python3 main.py
-```
-
-### Programa automatiškai:
-
-1. Sugeneruoja 1000 vartotojų
-2. Sugeneruoja 10000 transakcijų
-3. Sukuria Genesis bloką
-4. Pradeda kasimo procesą:
-   - Kuria 5 kandidatinius blokus
-   - Bando kasti kiekvieną 5s
-   - Prideda pirmą sėkmingai iškastą
-   - Kartoja kol nebeliko transakcijų
-5. Išveda rezultatus ir statistiką
-
-## Versijų Istorija
-
-### v0.1 Centralizuotas Blockchain
-- Bazinė blockchain struktūra
-- Vartotojų ir transakcijų generavimas
-- Proof-of-Work kasimas
-- Paprastas transakcijų hash (vietoj Merkle Tree)
-- Vizualus išvedimas
-
-### v0.2 Decentralizuotas Blockchain
-- Pilna Merkle Tree implementacija
-- Transakcijų validacija (balansas, ID, suma)
-- Kandidatinių blokų generavimas (5 blokai)
-- Konkurencinis kasimas su laiko limitu
-- Grandinės validacija
-- Patobulinta statistika
-
----
 
 ## AI Pagalbos Naudojimas
 
