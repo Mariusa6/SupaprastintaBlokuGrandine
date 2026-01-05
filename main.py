@@ -1,6 +1,5 @@
 import hashlib
 import time
-from datetime import datetime
 from typing import List, Dict
 
 
@@ -33,21 +32,61 @@ class Transaction:
         return f"TX({self.sender[:8]}→{self.receiver[:8]}: {self.amount:.2f})"
 
 
-class SimpleMerkleTree:
-    """Supaprastinta Merkle Tree - v0.1"""
+class MerkleTree:
+    """
+    Tikras Merkle Tree
+    """
     
     def __init__(self, transactions: List[Transaction]):
         self.transactions = transactions
-        self.root = self._calculate_simple_hash()
+        self.tree = []  # Visi lygiai
+        self.root = self._build_tree()
     
-    def _calculate_simple_hash(self) -> str:
+    def _build_tree(self) -> str:
+        """Stato Merkle Tree lygis po lygio"""
         if not self.transactions:
             return hashlib.sha256("".encode()).hexdigest()
-        all_tx_ids = ''.join([tx.transaction_id for tx in self.transactions])
-        return hashlib.sha256(all_tx_ids.encode()).hexdigest()
+        
+        # Pradinis lygis - transakcijų hash'ai
+        current_level = [tx.transaction_id for tx in self.transactions]
+        self.tree.append(current_level.copy())
+        
+        print(f"\nStatomas Merkle Tree:")
+        print(f"  Level 0: {len(current_level)} hash(es)")
+        
+        # Statome medį aukštyn
+        level = 1
+        while len(current_level) > 1:
+            next_level = []
+            
+            # Jei nelyginis - dubliuojame paskutinį
+            if len(current_level) % 2 != 0:
+                current_level.append(current_level[-1])
+                print(f"    Nelyginis skaičius - dubliuojame paskutinį")
+            
+            # Poruojame ir hash'uojame
+            for i in range(0, len(current_level), 2):
+                left = current_level[i]
+                right = current_level[i + 1]
+                combined = left + right
+                parent_hash = hashlib.sha256(combined.encode()).hexdigest()
+                next_level.append(parent_hash)
+            
+            self.tree.append(next_level.copy())
+            print(f"  Level {level}: {len(next_level)} hash(es)")
+            
+            current_level = next_level
+            level += 1
+        
+        print(f"  Root: {current_level[0][:32]}...")
+        return current_level[0]
     
     def get_root(self) -> str:
+        """Grąžina Merkle Root hash"""
         return self.root
+    
+    def __repr__(self):
+        return f"MerkleTree(root={self.root[:16]}..., levels={len(self.tree)})"
 
 
 class BlockHeader:
@@ -64,7 +103,7 @@ class BlockHeader:
 
 
 class Block:
-    """Bloko klasė"""
+    """Bloko klasė - dabar su tikru Merkle Tree"""
     
     def __init__(self, prev_block_hash: str, transactions: List[Transaction],
                  version: str = "1.0", difficulty_target: int = 3):
@@ -74,8 +113,11 @@ class Block:
         self.transactions = transactions
         self.difficulty_target = difficulty_target
         self.nonce = 0
-        self.merkle_tree = SimpleMerkleTree(transactions)
+        
+        # Dabar naudojame tikrą MerkleTree!
+        self.merkle_tree = MerkleTree(transactions)
         self.merkle_root = self.merkle_tree.get_root()
+        
         self.block_hash = ""
     
     def calculate_hash(self) -> str:
@@ -90,199 +132,72 @@ class Block:
         attempts = 0
         start_time = time.time()
         
+        print(f"\nKasimas (target: {target}...)")
+        
         while True:
             self.block_hash = self.calculate_hash()
             attempts += 1
             
             if self.block_hash.startswith(target):
                 elapsed = time.time() - start_time
-                print(f"  Iškasta! Nonce: {self.nonce}, Bandymų: {attempts}, "
-                      f"Laikas: {elapsed:.2f}s")
+                print(f"  Iškasta! Nonce: {self.nonce}, "
+                      f"Bandymų: {attempts}, Laikas: {elapsed:.2f}s")
                 return True
             
             self.nonce += 1
     
     def __repr__(self):
-        return f"Block(#{self.block_hash[:8]}..., tx={len(self.transactions)})"
-
-
-class Blockchain:
-    """Blokų grandinės klasė - v0.1 CENTRALIZUOTA"""
-    
-    def __init__(self, difficulty: int = 3):
-        self.chain: List[Block] = []
-        self.difficulty = difficulty
-        self.users: Dict[str, User] = {}
-        self.pending_transactions: List[Transaction] = []
-        self._create_genesis_block()
-    
-    def _create_genesis_block(self):
-        """Genesis bloko kūrimas"""
-        print("\nKuriamas Genesis blokas...")
-        genesis_block = Block(
-            prev_block_hash="0" * 64,
-            transactions=[],
-            difficulty_target=self.difficulty
-        )
-        genesis_block.block_hash = genesis_block.calculate_hash()
-        self.chain.append(genesis_block)
-        print(f"  Genesis: {genesis_block.block_hash[:32]}...")
-    
-    def get_last_block(self) -> Block:
-        return self.chain[-1]
-    
-    def add_user(self, user: User):
-        self.users[user.public_key] = user
-    
-    def add_transaction(self, transaction: Transaction):
-        self.pending_transactions.append(transaction)
-    
-    def mine_pending_transactions(self, transactions_per_block: int = 100) -> bool:
-        """
-        Kasa bloką su pending transakcijomis
-        Centralizuotas - tiesiog ima pirmas N transakcijų ir kasa
-        """
-        if len(self.pending_transactions) < transactions_per_block:
-            print(f"Per mažai TX: {len(self.pending_transactions)}")
-            return False
-        
-        # Pasirenkame transakcijas
-        selected_txs = self.pending_transactions[:transactions_per_block]
-        
-        print(f"\nKasomas blokas #{len(self.chain)}")
-        print(f"  TX: {len(selected_txs)}")
-        
-        # Sukuriame bloką
-        new_block = Block(
-            prev_block_hash=self.get_last_block().block_hash,
-            transactions=selected_txs,
-            difficulty_target=self.difficulty
-        )
-        
-        # Kasame
-        success = new_block.mine_block()
-        
-        if success:
-            #Atnaujiname balansus
-            for tx in selected_txs:
-                if tx.sender in self.users and tx.receiver in self.users:
-                    self.users[tx.sender].balance -= tx.amount
-                    self.users[tx.receiver].balance += tx.amount
-            
-            # Pašaliname transakcijas
-            self.pending_transactions = self.pending_transactions[transactions_per_block:]
-            
-            # Pridedame bloką
-            self.chain.append(new_block)
-            
-            print(f"  Blokas #{len(self.chain)-1} pridėtas!")
-            print(f"  Liko TX: {len(self.pending_transactions)}")
-            
-            return True
-        
-        return False
-    
-    def is_chain_valid(self) -> bool:
-        """Validuoja grandinę"""
-        for i in range(1, len(self.chain)):
-            current = self.chain[i]
-            previous = self.chain[i - 1]
-            
-            if current.block_hash != current.calculate_hash():
-                return False
-            if current.prev_block_hash != previous.block_hash:
-                return False
-            if not current.block_hash.startswith("0" * current.difficulty_target):
-                return False
-        
-        return True
-    
-    def print_chain(self):
-        """Išveda grandinę"""
-        print("\n" + "="*60)
-        print("BLOKŲ GRANDINĖ (v0.1)")
-        print("="*60)
-        
-        for i, block in enumerate(self.chain):
-            print(f"\n Blokas #{i}")
-            print(f"  Hash: {block.block_hash}")
-            print(f"  Prev: {block.prev_block_hash[:32]}...")
-            print(f"  TX: {len(block.transactions)}")
-            print(f"  Timestamp: {datetime.fromtimestamp(block.timestamp)}")
-        
-        print(f"\n{'='*60}")
-        print(f"Blokų: {len(self.chain)}")
-        print(f"Grandinė valid: {self.is_chain_valid()}")
-        print(f"{'='*60}")
-    
-    def get_statistics(self):
-        """Statistika"""
-        total_tx = sum(len(block.transactions) for block in self.chain)
-        return {
-            'blocks': len(self.chain),
-            'transactions': total_tx,
-            'pending': len(self.pending_transactions),
-            'users': len(self.users),
-            'valid': self.is_chain_valid()
-        }
+        return f"Block(hash={self.block_hash[:16]}..., tx={len(self.transactions)})"
 
 
 # Testavimas
 if __name__ == "__main__":
-    print("="*60)
-    print("Pilna v0.1 versija (Centralizuota)")
-    print("="*60)
+    print("="*70)
+    print("Tikras Merkle Tree")
+    print("="*70)
     
-    # Sukuriame blockchain
-    blockchain = Blockchain(difficulty=2)
-    
-    # Pridedame vartotojus
-    users = [
-        User("Alice", "key_alice", 1000.0),
-        User("Bob", "key_bob", 500.0),
-        User("Charlie", "key_charlie", 750.0),
-    ]
-    
-    for user in users:
-        blockchain.add_user(user)
-    
-    print(f"\nVartotojai: {len(users)}")
-    for user in users:
-        print(f"  {user}")
-    
-    # Pridedame transakcijas
+    # Sukuriame transakcijas
     transactions = [
-        Transaction("key_alice", "key_bob", 100.0),
-        Transaction("key_bob", "key_charlie", 50.0),
-        Transaction("key_charlie", "key_alice", 75.0),
-        Transaction("key_alice", "key_charlie", 150.0),
-        Transaction("key_bob", "key_alice", 25.0),
+        Transaction("alice", "bob", 10.0),
+        Transaction("bob", "charlie", 20.0),
+        Transaction("charlie", "diana", 30.0),
+        Transaction("diana", "alice", 40.0),
     ]
     
-    for tx in transactions:
-        blockchain.add_transaction(tx)
+    print("\nTransakcijos:")
+    for i, tx in enumerate(transactions):
+        print(f"  TX{i+1}: {tx.transaction_id[:16]}...")
     
-    print(f"\nTransakcijos: {len(transactions)}")
-    for tx in transactions:
-        print(f"  {tx}")
+    # Sukuriame tikrą Merkle Tree
+    merkle = MerkleTree(transactions)
+    
+    print(f"\nMerkle Tree Info:")
+    print(f"  {merkle}")
+    print(f"  Lygių: {len(merkle.tree)}")
+    
+    # Rodom kiekvieną lygį
+    print(f"\nVisi Merkle Tree lygiai:")
+    for level, hashes in enumerate(merkle.tree):
+        print(f"\n  Level {level}:")
+        for i, h in enumerate(hashes):
+            print(f"    [{i}] {h[:32]}...")
+    
+    print(f"\nMerkle Root: {merkle.root}")
+    
+    # Sukuriame bloką su tikru Merkle Tree
+    print(f"\n" + "="*70)
+    print("Blokas su tikru Merkle Tree")
+    print("="*70)
+    
+    block = Block(
+        prev_block_hash="0"*64,
+        transactions=transactions,
+        difficulty_target=2
+    )
+    
+    print(f"\n  Bloko Merkle root: {block.merkle_root}")
+    print(f"  Tree Merkle root:  {merkle.root}")
+    print(f"  Sutampa: {block.merkle_root == merkle.root}")
     
     # Kasame bloką
-    print("\n" + "="*60)
-    print("KASIMO PROCESAS")
-    print("="*60)
-    
-    blockchain.mine_pending_transactions(transactions_per_block=5)
-    
-    # Rodome rezultatus
-    blockchain.print_chain()
-    
-    # Balansai
-    print("\nGALUTINIAI BALANSAI:")
-    for user in users:
-        print(f"  {user}")
-    
-    # Statistika
-    stats = blockchain.get_statistics()
-    print("\nSTATISTIKA:")
-    for key, value in stats.items():
-        print(f"  {key}: {value}")
+    block.mine_block()
