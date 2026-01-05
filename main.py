@@ -1,9 +1,10 @@
 import hashlib
+import time
 from typing import List
 
 
 class User:
-    """Vartotojo klasė su vardu, viešuoju raktu ir balansu"""
+    """Vartotojo klasė"""
     
     def __init__(self, name: str, public_key: str, balance: float):
         self.name = name
@@ -11,7 +12,7 @@ class User:
         self.balance = balance
     
     def __repr__(self):
-        return f"User(name={self.name}, key={self.public_key[:8]}..., balance={self.balance:.2f})"
+        return f"User({self.name}, {self.balance:.2f})"
 
 
 class Transaction:
@@ -24,7 +25,6 @@ class Transaction:
         self.transaction_id = self._calculate_hash()
     
     def _calculate_hash(self) -> str:
-        """Apskaičiuoja transakcijos hash"""
         data = f"{self.sender}{self.receiver}{self.amount}"
         return hashlib.sha256(data.encode()).hexdigest()
     
@@ -33,28 +33,25 @@ class Transaction:
 
 
 class SimpleMerkleTree:
+    """Supaprastinta Merkle Tree"""
+    
     def __init__(self, transactions: List[Transaction]):
         self.transactions = transactions
         self.root = self._calculate_simple_hash()
     
     def _calculate_simple_hash(self) -> str:
-        """Paprastas visų transakcijų ID hash"""
         if not self.transactions:
             return hashlib.sha256("".encode()).hexdigest()
-        
-        # Sujungiame visus transaction ID ir hash'uojame
         all_tx_ids = ''.join([tx.transaction_id for tx in self.transactions])
         return hashlib.sha256(all_tx_ids.encode()).hexdigest()
     
     def get_root(self) -> str:
-        """Grąžina 'Merkle' root hash"""
         return self.root
-    
-    def __repr__(self):
-        return f"SimpleMerkleTree(root={self.root[:16]}..., tx_count={len(self.transactions)})"
 
 
 class BlockHeader:
+    """Bloko antraštės klasė"""
+    
     def __init__(self, prev_block_hash: str, timestamp: float, version: str,
                  merkle_root: str, nonce: int, difficulty_target: int):
         self.prev_block_hash = prev_block_hash
@@ -63,9 +60,67 @@ class BlockHeader:
         self.merkle_root = merkle_root
         self.nonce = nonce
         self.difficulty_target = difficulty_target
+
+
+class Block:
+    def __init__(self, prev_block_hash: str, transactions: List[Transaction],
+                 version: str = "1.0", difficulty_target: int = 3):
+        self.version = version
+        self.timestamp = time.time()
+        self.prev_block_hash = prev_block_hash
+        self.transactions = transactions
+        self.difficulty_target = difficulty_target
+        self.nonce = 0
+        
+        # Sukuriame Merkle Tree
+        self.merkle_tree = SimpleMerkleTree(transactions)
+        self.merkle_root = self.merkle_tree.get_root()
+        
+        # Bloko hash
+        self.block_hash = ""
+    
+    def calculate_hash(self) -> str:
+        """Apskaičiuoja bloko hash"""
+        header_data = (
+            f"{self.prev_block_hash}"
+            f"{self.timestamp}"
+            f"{self.version}"
+            f"{self.merkle_root}"
+            f"{self.nonce}"
+            f"{self.difficulty_target}"
+        )
+        return hashlib.sha256(header_data.encode()).hexdigest()
+    
+    def mine_block(self) -> bool:
+        target = "0" * self.difficulty_target
+        attempts = 0
+        start_time = time.time()
+        
+        print(f"\nKasimas pradėtas (target: {target}...)")
+        
+        while True:
+            self.block_hash = self.calculate_hash()
+            attempts += 1
+            
+            # Rodome progresą
+            if attempts % 10000 == 0:
+                elapsed = time.time() - start_time
+                print(f"  Bandymas #{attempts}, laikas: {elapsed:.2f}s")
+            
+            # Tikriname ar hash atitinka target
+            if self.block_hash.startswith(target):
+                elapsed = time.time() - start_time
+                print(f"  Blokas iškastas!")
+                print(f"  Hash: {self.block_hash}")
+                print(f"  Nonce: {self.nonce}")
+                print(f"  Bandymų: {attempts}")
+                print(f"  Laikas: {elapsed:.2f}s")
+                return True
+            
+            self.nonce += 1
     
     def __repr__(self):
-        return f"BlockHeader(prev={self.prev_block_hash[:16]}..., nonce={self.nonce})"
+        return f"Block(hash={self.block_hash[:16]}..., tx={len(self.transactions)})"
 
 
 # Testavimas
@@ -73,32 +128,25 @@ if __name__ == "__main__":
     print("="*50)
     
     # Sukuriame transakcijas
-    tx1 = Transaction("sender1", "receiver1", 10.0)
-    tx2 = Transaction("sender2", "receiver2", 20.0)
-    tx3 = Transaction("sender3", "receiver3", 30.0)
+    tx1 = Transaction("alice_key", "bob_key", 50.0)
+    tx2 = Transaction("bob_key", "charlie_key", 25.0)
     
     print("\nTransakcijos:")
     print(f"  {tx1}")
     print(f"  {tx2}")
-    print(f"  {tx3}")
     
-    # Sukuriame SimpleMerkleTree
-    merkle = SimpleMerkleTree([tx1, tx2, tx3])
-    
-    print("\nSimpleMerkleTree:")
-    print(f"  {merkle}")
-    print(f"  Root: {merkle.root}")
-    
-    # Sukuriame BlockHeader
-    import time
-    header = BlockHeader(
+    # Sukuriame bloką
+    block = Block(
         prev_block_hash="0"*64,
-        timestamp=time.time(),
-        version="1.0",
-        merkle_root=merkle.root,
-        nonce=0,
-        difficulty_target=3
+        transactions=[tx1, tx2],
+        difficulty_target=2  # Lengvesnis difficulty testavimui
     )
     
-    print("\nBlockHeader:")
-    print(f"  {header}")
+    print(f"\nBlokas sukurtas")
+    print(f"  Merkle root: {block.merkle_root[:32]}...")
+    
+    # Kasame bloką
+    block.mine_block()
+    
+    print(f"\nGalutinis blokas:")
+    print(f"  {block}")
