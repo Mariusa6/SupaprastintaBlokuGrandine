@@ -34,7 +34,7 @@ class Transaction:
 
 
 class SimpleMerkleTree:
-    """Supaprastinta Merkle Tree"""
+    """Supaprastinta Merkle Tree - v0.1"""
     
     def __init__(self, transactions: List[Transaction]):
         self.transactions = transactions
@@ -88,58 +88,99 @@ class Block:
     def mine_block(self) -> bool:
         target = "0" * self.difficulty_target
         attempts = 0
+        start_time = time.time()
         
         while True:
             self.block_hash = self.calculate_hash()
             attempts += 1
             
             if self.block_hash.startswith(target):
-                print(f"Blokas iškastas! Nonce: {self.nonce}, Bandymų: {attempts}")
+                elapsed = time.time() - start_time
+                print(f"  Iškasta! Nonce: {self.nonce}, Bandymų: {attempts}, "
+                      f"Laikas: {elapsed:.2f}s")
                 return True
             
             self.nonce += 1
     
     def __repr__(self):
-        return f"Block(hash={self.block_hash[:16]}..., tx={len(self.transactions)})"
+        return f"Block(#{self.block_hash[:8]}..., tx={len(self.transactions)})"
 
 
 class Blockchain:
-
+    """Blokų grandinės klasė - v0.1 CENTRALIZUOTA"""
+    
     def __init__(self, difficulty: int = 3):
         self.chain: List[Block] = []
         self.difficulty = difficulty
         self.users: Dict[str, User] = {}
         self.pending_transactions: List[Transaction] = []
-        
-        # Sukuriame Genesis bloką
         self._create_genesis_block()
     
     def _create_genesis_block(self):
+        """Genesis bloko kūrimas"""
         print("\nKuriamas Genesis blokas...")
-        
         genesis_block = Block(
             prev_block_hash="0" * 64,
             transactions=[],
             difficulty_target=self.difficulty
         )
-        
         genesis_block.block_hash = genesis_block.calculate_hash()
         self.chain.append(genesis_block)
-        
-        print(f"Genesis blokas sukurtas!")
-        print(f"  Hash: {genesis_block.block_hash[:32]}...")
+        print(f"  Genesis: {genesis_block.block_hash[:32]}...")
     
     def get_last_block(self) -> Block:
-        """Grąžina paskutinį bloką"""
         return self.chain[-1]
     
     def add_user(self, user: User):
-        """Prideda vartotoją"""
         self.users[user.public_key] = user
     
     def add_transaction(self, transaction: Transaction):
-        """Prideda transakciją"""
         self.pending_transactions.append(transaction)
+    
+    def mine_pending_transactions(self, transactions_per_block: int = 100) -> bool:
+        """
+        Kasa bloką su pending transakcijomis
+        Centralizuotas - tiesiog ima pirmas N transakcijų ir kasa
+        """
+        if len(self.pending_transactions) < transactions_per_block:
+            print(f"Per mažai TX: {len(self.pending_transactions)}")
+            return False
+        
+        # Pasirenkame transakcijas
+        selected_txs = self.pending_transactions[:transactions_per_block]
+        
+        print(f"\nKasomas blokas #{len(self.chain)}")
+        print(f"  TX: {len(selected_txs)}")
+        
+        # Sukuriame bloką
+        new_block = Block(
+            prev_block_hash=self.get_last_block().block_hash,
+            transactions=selected_txs,
+            difficulty_target=self.difficulty
+        )
+        
+        # Kasame
+        success = new_block.mine_block()
+        
+        if success:
+            #Atnaujiname balansus
+            for tx in selected_txs:
+                if tx.sender in self.users and tx.receiver in self.users:
+                    self.users[tx.sender].balance -= tx.amount
+                    self.users[tx.receiver].balance += tx.amount
+            
+            # Pašaliname transakcijas
+            self.pending_transactions = self.pending_transactions[transactions_per_block:]
+            
+            # Pridedame bloką
+            self.chain.append(new_block)
+            
+            print(f"  Blokas #{len(self.chain)-1} pridėtas!")
+            print(f"  Liko TX: {len(self.pending_transactions)}")
+            
+            return True
+        
+        return False
     
     def is_chain_valid(self) -> bool:
         """Validuoja grandinę"""
@@ -147,15 +188,10 @@ class Blockchain:
             current = self.chain[i]
             previous = self.chain[i - 1]
             
-            # Tikrina hash
             if current.block_hash != current.calculate_hash():
                 return False
-            
-            # Tikrina sąsają
             if current.prev_block_hash != previous.block_hash:
                 return False
-            
-            # Tikrina difficulty
             if not current.block_hash.startswith("0" * current.difficulty_target):
                 return False
         
@@ -163,48 +199,90 @@ class Blockchain:
     
     def print_chain(self):
         """Išveda grandinę"""
-        print("\nBLOKŲ GRANDINĖ")
-        print("="*50)
+        print("\n" + "="*60)
+        print("BLOKŲ GRANDINĖ (v0.1)")
+        print("="*60)
         
         for i, block in enumerate(self.chain):
-            print(f"\nBlokas #{i}")
-            print(f"  Hash: {block.block_hash[:32]}...")
+            print(f"\n Blokas #{i}")
+            print(f"  Hash: {block.block_hash}")
             print(f"  Prev: {block.prev_block_hash[:32]}...")
             print(f"  TX: {len(block.transactions)}")
-            print(f"  Nonce: {block.nonce}")
+            print(f"  Timestamp: {datetime.fromtimestamp(block.timestamp)}")
         
-        print(f"\nGrandinė valid: {self.is_chain_valid()}")
+        print(f"\n{'='*60}")
+        print(f"Blokų: {len(self.chain)}")
+        print(f"Grandinė valid: {self.is_chain_valid()}")
+        print(f"{'='*60}")
     
-    def __repr__(self):
-        return f"Blockchain(blocks={len(self.chain)}, pending_tx={len(self.pending_transactions)})"
+    def get_statistics(self):
+        """Statistika"""
+        total_tx = sum(len(block.transactions) for block in self.chain)
+        return {
+            'blocks': len(self.chain),
+            'transactions': total_tx,
+            'pending': len(self.pending_transactions),
+            'users': len(self.users),
+            'valid': self.is_chain_valid()
+        }
 
 
 # Testavimas
 if __name__ == "__main__":
-    print("Blockchain klasė")
-    print("="*50)
+    print("="*60)
+    print("Pilna v0.1 versija (Centralizuota)")
+    print("="*60)
     
     # Sukuriame blockchain
     blockchain = Blockchain(difficulty=2)
     
     # Pridedame vartotojus
-    user1 = User("Alice", "key_alice", 1000.0)
-    user2 = User("Bob", "key_bob", 500.0)
+    users = [
+        User("Alice", "key_alice", 1000.0),
+        User("Bob", "key_bob", 500.0),
+        User("Charlie", "key_charlie", 750.0),
+    ]
     
-    blockchain.add_user(user1)
-    blockchain.add_user(user2)
+    for user in users:
+        blockchain.add_user(user)
     
-    print(f"\nPridėta vartotojų: {len(blockchain.users)}")
+    print(f"\nVartotojai: {len(users)}")
+    for user in users:
+        print(f"  {user}")
     
     # Pridedame transakcijas
-    tx1 = Transaction(user1.public_key, user2.public_key, 100.0)
-    tx2 = Transaction(user2.public_key, user1.public_key, 50.0)
+    transactions = [
+        Transaction("key_alice", "key_bob", 100.0),
+        Transaction("key_bob", "key_charlie", 50.0),
+        Transaction("key_charlie", "key_alice", 75.0),
+        Transaction("key_alice", "key_charlie", 150.0),
+        Transaction("key_bob", "key_alice", 25.0),
+    ]
     
-    blockchain.add_transaction(tx1)
-    blockchain.add_transaction(tx2)
+    for tx in transactions:
+        blockchain.add_transaction(tx)
     
-    print(f"Pridėta transakcijų: {len(blockchain.pending_transactions)}")
+    print(f"\nTransakcijos: {len(transactions)}")
+    for tx in transactions:
+        print(f"  {tx}")
     
-    # Rodom blockchain
-    print(f"\n{blockchain}")
+    # Kasame bloką
+    print("\n" + "="*60)
+    print("KASIMO PROCESAS")
+    print("="*60)
+    
+    blockchain.mine_pending_transactions(transactions_per_block=5)
+    
+    # Rodome rezultatus
     blockchain.print_chain()
+    
+    # Balansai
+    print("\nGALUTINIAI BALANSAI:")
+    for user in users:
+        print(f"  {user}")
+    
+    # Statistika
+    stats = blockchain.get_statistics()
+    print("\nSTATISTIKA:")
+    for key, value in stats.items():
+        print(f"  {key}: {value}")
