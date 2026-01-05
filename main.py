@@ -1,6 +1,6 @@
 import hashlib
 import time
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 
 class User:
@@ -10,13 +10,10 @@ class User:
         self.name = name
         self.public_key = public_key
         self.balance = balance
-    
-    def __repr__(self):
-        return f"User({self.name}, {self.balance:.2f})"
 
 
 class Transaction:
-    """Transakcijos klasė - dabar su validacija!"""
+    """Transakcijos klasė su validacija"""
     
     def __init__(self, sender: str, receiver: str, amount: float):
         self.sender = sender
@@ -29,44 +26,19 @@ class Transaction:
         return hashlib.sha256(data.encode()).hexdigest()
     
     def is_valid(self, users_dict: Dict[str, User]) -> bool:
-        """
-        Transakcijos validacija
-        """
-        # 1. Tikrina ar siuntėjas egzistuoja
-        if self.sender not in users_dict:
-            print(f"  Siuntėjas {self.sender[:8]}... neegzistuoja")
+        """Validuoja transakciją"""
+        if self.sender not in users_dict or self.receiver not in users_dict:
             return False
-        
-        # 2. Tikrina ar gavėjas egzistuoja
-        if self.receiver not in users_dict:
-            print(f"  Gavėjas {self.receiver[:8]}... neegzistuoja")
-            return False
-        
-        # 3. Tikrina ar suma teigiama
         if self.amount <= 0:
-            print(f"  Suma {self.amount} nėra teigiama")
             return False
-        
-        # 4. Tikrina ar siuntėjas turi pakankamai lėšų
         if users_dict[self.sender].balance < self.amount:
-            sender_balance = users_dict[self.sender].balance
-            print(f"  Nepakanka lėšų: turi {sender_balance:.2f}, "
-                  f"reikia {self.amount:.2f}")
             return False
-        
-        # 5. Tikrina ar transaction_id teisingas
         expected_hash = hashlib.sha256(
             f"{self.sender}{self.receiver}{self.amount}".encode()
         ).hexdigest()
-        
         if self.transaction_id != expected_hash:
-            print(f"  Transaction ID neteisingas")
             return False
-        
         return True
-    
-    def __repr__(self):
-        return f"TX({self.sender[:8]}→{self.receiver[:8]}: {self.amount:.2f})"
 
 
 class MerkleTree:
@@ -86,15 +58,12 @@ class MerkleTree:
         
         while len(current_level) > 1:
             next_level = []
-            
             if len(current_level) % 2 != 0:
                 current_level.append(current_level[-1])
-            
             for i in range(0, len(current_level), 2):
                 combined = current_level[i] + current_level[i + 1]
                 parent_hash = hashlib.sha256(combined.encode()).hexdigest()
                 next_level.append(parent_hash)
-            
             self.tree.append(next_level.copy())
             current_level = next_level
         
@@ -118,7 +87,7 @@ class BlockHeader:
 
 
 class Block:
-    """Bloko klasė"""
+    """Bloko klasė - dabar su laiko limitais!"""
     
     def __init__(self, prev_block_hash: str, transactions: List[Transaction],
                  version: str = "1.0", difficulty_target: int = 3):
@@ -139,102 +108,117 @@ class Block:
         )
         return hashlib.sha256(header_data.encode()).hexdigest()
     
-    def mine_block(self) -> bool:
+    def mine_block(self, max_time: float = 5.0, max_attempts: Optional[int] = None) -> bool:
+        """
+        Kasimas su laiko ir bandymų limitais
+        
+        Args:
+            max_time: Maksimalus kasimo laikas sekundėmis
+            max_attempts: Maksimalus bandymų skaičius (None = neribotas)
+        
+        Returns:
+            True jei iškasta, False jei timeout
+        """
         target = "0" * self.difficulty_target
         attempts = 0
+        start_time = time.time()
+        
+        print(f"\nKASIMAS PRADĖTAS")
+        print(f"  Target: {target}...")
+        print(f"  Max laikas: {max_time}s")
+        if max_attempts:
+            print(f"  Max bandymų: {max_attempts:,}")
         
         while True:
             self.block_hash = self.calculate_hash()
             attempts += 1
             
+            # Rodome progresą kas 50000 bandymų
+            if attempts % 50000 == 0:
+                elapsed = time.time() - start_time
+                rate = attempts / elapsed if elapsed > 0 else 0
+                print(f"  Bandymas #{attempts:,} | "
+                      f"Laikas: {elapsed:.2f}s | "
+                      f"Greitis: {rate:,.0f} hash/s")
+            
+            # Tikriname ar hash atitinka target
             if self.block_hash.startswith(target):
-                print(f"  Iškasta! Nonce: {self.nonce}, Bandymų: {attempts}")
+                elapsed = time.time() - start_time
+                rate = attempts / elapsed if elapsed > 0 else 0
+                print(f"\n  BLOKAS IŠKASTAS!")
+                print(f"  Hash: {self.block_hash[:32]}...")
+                print(f"  Nonce: {self.nonce}")
+                print(f"  Bandymų: {attempts:,}")
+                print(f"  Laikas: {elapsed:.2f}s")
+                print(f"  Greitis: {rate:,.0f} hash/s")
                 return True
+            
+            # Tikriname laiko limitą
+            if time.time() - start_time > max_time:
+                elapsed = time.time() - start_time
+                print(f"\n  LAIKO LIMITAS PASIEKTAS ({elapsed:.2f}s)")
+                print(f"  Bandymų: {attempts:,}")
+                print(f"  Paskutinis hash: {self.block_hash[:32]}...")
+                return False
+            
+            # Tikriname bandymų limitą
+            if max_attempts and attempts >= max_attempts:
+                elapsed = time.time() - start_time
+                print(f"\n  BANDYMŲ LIMITAS PASIEKTAS ({attempts:,})")
+                print(f"  Laikas: {elapsed:.2f}s")
+                print(f"  Paskutinis hash: {self.block_hash[:32]}...")
+                return False
             
             self.nonce += 1
 
 
 # Testavimas
 if __name__ == "__main__":
-    print("="*70)
-    print("Transakcijų validacija")
-    print("="*70)
     
-    # Sukuriame vartotojus
+    # Sukuriame test transakcijas
     users = {
-        "key_alice": User("Alice", "key_alice", 1000.0),
-        "key_bob": User("Bob", "key_bob", 500.0),
-        "key_charlie": User("Charlie", "key_charlie", 100.0),
+        "alice": User("Alice", "alice", 1000.0),
+        "bob": User("Bob", "bob", 500.0),
     }
     
-    print("\nVartotojai:")
-    for key, user in users.items():
-        print(f"  {user}")
-    
-    # Testuojame validacijas
-    print("\n" + "="*70)
-    print("TRANSAKCIJŲ VALIDACIJOS TESTAI")
-    print("="*70)
-    
-    # Test 1: Valid transakcija
-    print("\nValid transakcija:")
-    tx1 = Transaction("key_alice", "key_bob", 100.0)
-    print(f"  {tx1}")
-    result = tx1.is_valid(users)
-    print(f"  Validacija: {result}")
-    
-    # Test 2: Per didelė suma
-    print("\nPer didelė suma (Charlie turi tik 100):")
-    tx2 = Transaction("key_charlie", "key_alice", 200.0)
-    print(f"  {tx2}")
-    result = tx2.is_valid(users)
-    print(f"  Validacija: {result}")
-    
-    # Test 3: Neigiama suma
-    print("\nNeigiama suma:")
-    tx3 = Transaction("key_alice", "key_bob", -50.0)
-    print(f"  {tx3}")
-    result = tx3.is_valid(users)
-    print(f"  Validacija: {result}")
-    
-    # Test 4: Neegzistuojantis siuntėjas
-    print("\nNeegzistuojantis siuntėjas:")
-    tx4 = Transaction("key_unknown", "key_bob", 50.0)
-    print(f"  {tx4}")
-    result = tx4.is_valid(users)
-    print(f"  Validacija: {result}")
-    
-    # Test 5: Kelios valid transakcijos
-    print("\nKelios valid transakcijos:")
-    valid_txs = []
-    test_txs = [
-        Transaction("key_alice", "key_bob", 50.0),
-        Transaction("key_bob", "key_charlie", 30.0),
-        Transaction("key_charlie", "key_alice", 20.0),
-        Transaction("key_alice", "key_charlie", 2000.0),  # Invalid - per daug
+    txs = [
+        Transaction("alice", "bob", 100.0),
+        Transaction("bob", "alice", 50.0),
     ]
     
-    for tx in test_txs:
-        if tx.is_valid(users):
-            valid_txs.append(tx)
-            print(f"  validžios{tx}")
-        else:
-            print(f" nevalidžios {tx}")
-    
-    print(f"\n  Valid transakcijų: {len(valid_txs)}/{len(test_txs)}")
-    
-    # Sukuriame bloką su valid transakcijomis
+    # Test 1: Lengvas difficulty - turėtų greitai iškasti
     print("\n" + "="*70)
-    print("Blokas su tik VALID transakcijomis")
+    print("TEST 1: Lengvas difficulty (2) - turėtų suspėti")
     print("="*70)
     
-    block = Block(
-        prev_block_hash="0"*64,
-        transactions=valid_txs,
-        difficulty_target=2
-    )
+    block1 = Block("0"*64, txs, difficulty_target=2)
+    success = block1.mine_block(max_time=5.0)
+    print(f"\n  Rezultatas: {'Iškasta' if success else 'Timeout'}")
     
-    print(f"\n  Transakcijų bloke: {len(block.transactions)}")
-    print(f"  Merkle root: {block.merkle_root[:32]}...")
+    # Test 2: Sunkus difficulty - greičiausiai timeout
+    print("\n" + "="*70)
+    print("TEST 2: Sunkus difficulty (5) - greičiausiai timeout")
+    print("="*70)
     
-    block.mine_block()
+    block2 = Block("0"*64, txs, difficulty_target=5)
+    success = block2.mine_block(max_time=3.0)
+    print(f"\n  Rezultatas: {'Iškasta' if success else 'Timeout'}")
+    
+    # Test 3: Su bandymų limitu
+    print("\n" + "="*70)
+    print("TEST 3: Difficulty 3 su 1000 bandymų limitu")
+    print("="*70)
+    
+    block3 = Block("0"*64, txs, difficulty_target=3)
+    success = block3.mine_block(max_time=10.0, max_attempts=1000)
+    print(f"\n  Rezultatas: {'Iškasta' if success else 'Limitas'}")
+    
+    # Test 4: Normalus kasimas
+    print("\n" + "="*70)
+    print("TEST 4: Normalus kasimas (difficulty 3, 10s)")
+    print("="*70)
+    
+    block4 = Block("0"*64, txs, difficulty_target=3)
+    success = block4.mine_block(max_time=10.0)
+    print(f"\n  Rezultatas: {'Iškasta' if success else 'Timeout'}")
+
