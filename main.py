@@ -1,6 +1,7 @@
 import hashlib
 import time
 import random
+from datetime import datetime
 from typing import List, Dict, Optional
 
 
@@ -11,6 +12,9 @@ class User:
         self.name = name
         self.public_key = public_key
         self.balance = balance
+    
+    def __repr__(self):
+        return f"User({self.name}, {self.balance:.2f})"
 
 
 class Transaction:
@@ -37,6 +41,9 @@ class Transaction:
             f"{self.sender}{self.receiver}{self.amount}".encode()
         ).hexdigest()
         return self.transaction_id == expected_hash
+    
+    def __repr__(self):
+        return f"TX({self.sender[:8]}→{self.receiver[:8]}: {self.amount:.2f})"
 
 
 class MerkleTree:
@@ -82,7 +89,7 @@ class BlockHeader:
 
 
 class Block:
-    """Bloko klasė su laiko limitais"""
+    """Bloko klasė"""
     
     def __init__(self, prev_block_hash: str, transactions: List[Transaction],
                  version: str = "1.0", difficulty_target: int = 3):
@@ -114,22 +121,26 @@ class Block:
             
             if self.block_hash.startswith(target):
                 elapsed = time.time() - start_time
-                print(f"  Iškasta! Nonce: {self.nonce}, "
-                      f"Bandymų: {attempts:,}, Laikas: {elapsed:.2f}s")
+                rate = attempts / elapsed if elapsed > 0 else 0
+                print(f"    Iškasta! Nonce: {self.nonce}, "
+                      f"Bandymų: {attempts:,}, Laikas: {elapsed:.2f}s, "
+                      f"Greitis: {rate:,.0f} hash/s")
                 return True
             
             if time.time() - start_time > max_time:
                 return False
-            
             if max_attempts and attempts >= max_attempts:
                 return False
             
             self.nonce += 1
+    
+    def __repr__(self):
+        return f"Block(hash={self.block_hash[:16]}..., tx={len(self.transactions)})"
 
 
 class Blockchain:
     """
-    Blockchain klasė - dabar su kandidatiniais blokais!
+    Pilna decentralizuota blockchain
     """
     
     def __init__(self, difficulty: int = 3):
@@ -156,124 +167,183 @@ class Blockchain:
     
     def create_candidate_blocks(self, num_candidates: int = 5,
                                transactions_per_block: int = 100) -> List[Block]:
-        """
-        Kuria kandidatinius blokus
-        
-        Kiekvienas kandidatas turi skirtingas atsitiktines transakcijas.
-        Tai imituoja decentralizuotą kasimą - kiekvienas kasėjas turi savo bloką.
-        
-        Args:
-            num_candidates: Kiek kandidatų sukurti
-            transactions_per_block: Transakcijų skaičius bloke
-        
-        Returns:
-            List[Block]: Kandidatinių blokų sąrašas
-        """
+        """Kuria kandidatinius blokus"""
         candidates = []
         
-        print(f"\nKuriami {num_candidates} kandidatiniai blokai...")
-        print(f"  Transakcijų laukia: {len(self.pending_transactions)}")
-        print(f"  Transakcijų bloke: {transactions_per_block}")
-        
         if len(self.pending_transactions) < transactions_per_block:
-            print(f"  Per mažai transakcijų!")
             return []
         
         for i in range(num_candidates):
-            # Atsitiktinai pasirenkame transakcijas
-            # Kiekvienas kandidatas gali turėti skirtingas TX
             selected_txs = random.sample(
                 self.pending_transactions,
                 min(transactions_per_block, len(self.pending_transactions))
             )
-            
-            # Filtruojame tik valid transakcijas
             valid_txs = [tx for tx in selected_txs if tx.is_valid(self.users)]
             
             if not valid_txs:
-                print(f"  Kandidatas #{i+1}: nėra valid transakcijų")
                 continue
             
-            # Sukuriame kandidatinį bloką
             candidate = Block(
                 prev_block_hash=self.get_last_block().block_hash,
                 transactions=valid_txs,
                 difficulty_target=self.difficulty
             )
-            
             candidates.append(candidate)
-            print(f"  ✓ Kandidatas #{i+1}: {len(valid_txs)} valid transakcijų, "
-                  f"merkle: {candidate.merkle_root[:16]}...")
         
-        print(f"\n  Sukurta kandidatų: {len(candidates)}")
         return candidates
+    
+    def mine_and_add_block(self, max_time: float = 5.0, max_attempts: Optional[int] = None) -> bool:
+        """
+        Decentralizuotas kasimas
+        
+        Kuria kelis kandidatinius blokus ir bando kasti kiekvieną.
+        Pirmas iškastas blokas pridedamas į grandinę.
+        Jei nė vienas neiškastas - padidina laiką ir bando dar kartą.
+        
+        Tai imituoja decentralizuotą tinklą, kur keli kasėjai konkuruoja.
+        """
+        # 1. Sukuriame kandidatinius blokus
+        candidates = self.create_candidate_blocks(num_candidates=5, transactions_per_block=100)
+        
+        if not candidates:
+            print("Nepavyko sukurti kandidatinių blokų")
+            return False
+        
+        print(f"\nSukurta {len(candidates)} kandidatinių blokų")
+        
+        # 2. Bandome kasti kiekvieną kandidatą
+        print(f"\nKASIMAS (max {max_time}s per kandidatą):")
+        
+        for i, block in enumerate(candidates):
+            print(f"\n  Kandidatas #{i+1}/{len(candidates)}:")
+            
+            if block.mine_block(max_time=max_time, max_attempts=max_attempts):
+                # Blokas iškastas! Pridedame jį
+                self._add_mined_block(block)
+                return True
+        
+        # 3. Jei nė vienas neiškastas - pabandome su didesniu laiku
+        print(f"\nNė vienas kandidatas neiškastas per {max_time}s")
+        print(f"Bandoma dar kartą su {max_time*2}s...")
+        
+        for i, block in enumerate(candidates):
+            print(f"\n  Kandidatas #{i+1}/{len(candidates)} (2nd attempt):")
+            
+            if block.mine_block(max_time=max_time * 2, max_attempts=max_attempts):
+                self._add_mined_block(block)
+                return True
+        
+        print(f"\nNepavyko iškasti bloko net su {max_time*2}s")
+        return False
+    
+    def _add_mined_block(self, block: Block):
+        """
+        Prideda iškastą bloką ir atnaujina balansus
+        """
+        # Pašaliname transakcijas iš pending
+        for tx in block.transactions:
+            if tx in self.pending_transactions:
+                self.pending_transactions.remove(tx)
+            
+            # Atnaujiname balansus
+            if tx.sender in self.users and tx.receiver in self.users:
+                self.users[tx.sender].balance -= tx.amount
+                self.users[tx.receiver].balance += tx.amount
+        
+        # Pridedame bloką į grandinę
+        self.chain.append(block)
+        
+        print(f"\n{'='*70}")
+        print(f"BLOKAS PRIDĖTAS Į GRANDINĘ")
+        print(f"{'='*70}")
+        print(f"  Bloko numeris: {len(self.chain) - 1}")
+        print(f"  Hash: {block.block_hash[:32]}...")
+        print(f"  Transakcijų: {len(block.transactions)}")
+        print(f"  Merkle root: {block.merkle_root[:32]}...")
+        print(f"  Nonce: {block.nonce}")
+        print(f"  Liko TX: {len(self.pending_transactions)}")
+        print(f"{'='*70}")
+    
+    def is_chain_valid(self) -> bool:
+        """Validuoja grandinę"""
+        for i in range(1, len(self.chain)):
+            current = self.chain[i]
+            previous = self.chain[i - 1]
+            
+            if current.block_hash != current.calculate_hash():
+                return False
+            if current.prev_block_hash != previous.block_hash:
+                return False
+            if not current.block_hash.startswith("0" * current.difficulty_target):
+                return False
+        return True
+    
+    def print_statistics(self):
+        """Statistika"""
+        total_tx = sum(len(block.transactions) for block in self.chain)
+        print(f"\nSTATISTIKA:")
+        print(f"  Blokų: {len(self.chain)}")
+        print(f"  Transakcijų: {total_tx}")
+        print(f"  Liko TX: {len(self.pending_transactions)}")
+        print(f"  Vartotojų: {len(self.users)}")
+        print(f"  Grandinė valid: {'yes' if self.is_chain_valid() else 'no'}")
 
 
 # Testavimas
 if __name__ == "__main__":
     print("="*70)
-    print("Kandidatiniai blokai")
+    print("Pilna decentralizuota blockchain (RELEASE)")
     print("="*70)
     
     # Sukuriame blockchain
     blockchain = Blockchain(difficulty=2)
     
     # Pridedame vartotojus
-    users_list = [
-        User("Alice", "key_alice", 1000.0),
-        User("Bob", "key_bob", 800.0),
-        User("Charlie", "key_charlie", 600.0),
-        User("Diana", "key_diana", 400.0),
+    users = [
+        User("Alice", "alice", 5000.0),
+        User("Bob", "bob", 4000.0),
+        User("Charlie", "charlie", 3000.0),
+        User("Diana", "diana", 2000.0),
     ]
     
-    for user in users_list:
+    for user in users:
         blockchain.add_user(user)
     
-    print(f"\nPridėta {len(users_list)} vartotojų")
+    print(f"\nVartotojai: {len(users)}")
     
-    # Sukuriame daug transakcijų
+    # Generuojame transakcijas
     print(f"\nGeneruojamos transakcijos...")
-    for i in range(50):
-        sender = random.choice(users_list)
-        receiver = random.choice(users_list)
+    for i in range(150):
+        sender = random.choice(users)
+        receiver = random.choice(users)
         while sender.public_key == receiver.public_key:
-            receiver = random.choice(users_list)
-        
+            receiver = random.choice(users)
         amount = random.uniform(10, 100)
         tx = Transaction(sender.public_key, receiver.public_key, amount)
         blockchain.add_transaction(tx)
     
     print(f"  Sukurta {len(blockchain.pending_transactions)} transakcijų")
     
-    # Test 1: Sukuriame 3 kandidatus
+    # Kasame blokus (v0.2 decentralizuota versija)
     print("\n" + "="*70)
-    print("TEST 1: Sukuriame 3 kandidatinius blokus po 10 TX")
+    print("DECENTRALIZUOTAS KASIMAS")
     print("="*70)
     
-    candidates = blockchain.create_candidate_blocks(
-        num_candidates=3,
-        transactions_per_block=10
-    )
-    
-    print(f"\nKandidatų palyginimas:")
-    for i, candidate in enumerate(candidates):
-        print(f"\n  Kandidatas #{i+1}:")
-        print(f"    TX: {len(candidate.transactions)}")
-        print(f"    Merkle: {candidate.merkle_root[:32]}...")
-        print(f"    Pirma TX: {candidate.transactions[0] if candidate.transactions else 'N/A'}")
-    
-    # Test 2: Bandomekasti pirmus 2 kandidatus
-    print("\n" + "="*70)
-    print("TEST 2: Bandome kasti pirmus 2 kandidatus")
-    print("="*70)
-    
-    for i in range(min(2, len(candidates))):
-        print(f"\nKasimas kandidatas #{i+1}:")
-        success = candidates[i].mine_block(max_time=5.0)
+    for round in range(1, 3):
+        print(f"\n{'#'*70}")
+        print(f"# RAUNDAS #{round}")
+        print(f"{'#'*70}")
         
-        if success:
-            print(f"  Kandidatas #{i+1} LAIMĖJO!")
-            print(f"  Hash: {candidates[i].block_hash[:32]}...")
+        success = blockchain.mine_and_add_block(max_time=3.0)
+        
+        if not success:
+            print(f"Raundas #{round} nepavyko")
             break
-        else:
-            print(f"  Kandidatas #{i+1} timeout")
+    
+    # Rezultatai
+    blockchain.print_statistics()
+    
+    # Balansai
+    print(f"\nGALUTINIAI BALANSAI:")
+    for user in users:
+        print(f"  {user}")
